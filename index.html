@@ -832,7 +832,6 @@
 
     <div style="margin-top:18px;font-size:11px;color:var(--gray-500);text-align:center;border-top:1px solid var(--gray-200);padding-top:12px;">
       © 2569 ฝ่ายขนส่งและเคลื่อนย้าย สกบ.กอ.รมน.<br>
-      <span style="color:#856404;">⚠️ Default Login: admin / isoc2569 — ควรเปลี่ยนทันทีหลังเข้าระบบครั้งแรก</span><br>
       <a href="javascript:void(0)" onclick="emergencyResetAdmin()" style="color:var(--gray-700);text-decoration:underline;font-size:11px;">🆘 ลืมรหัสผ่าน Admin?</a>
     </div>
   </div>
@@ -1577,6 +1576,17 @@ function loadSeedData() {
     });
   });
 
+  // ตั้งค่า default users — เฉพาะกรณีที่ยังไม่มีผู้ใช้เลยเท่านั้น (เปิดครั้งแรกสุด)
+  if (!db.users || db.users.length === 0) {
+    db.users = [
+      {id:'u_admin', username:'admin', password:'isoc2569', name:'ผู้ดูแลระบบ', role:'admin', rank:'', email:'', active:true, created_at:'2026-04-01'},
+      {id:'u_officer', username:'officer', password:'fuel2569', name:'กฤษดา จันทรวิจิตรกุล', role:'officer', rank:'พ.ท.', email:'', active:true, created_at:'2026-04-01'},
+      {id:'u_viewer', username:'commander', password:'view2569', name:'ผู้บังคับบัญชา', role:'viewer', rank:'', email:'', active:true, created_at:'2026-04-01'}
+    ];
+  }
+  if (!db.audit_log) db.audit_log = [];
+  if (!db.login_log) db.login_log = [];
+
   saveDB();
 }
 
@@ -1596,23 +1606,10 @@ function loadDB() {
 function migrateDB() {
   let changed = false;
 
-  // เพิ่ม users (ระบบ Login)
-  if (!db.users || db.users.length === 0) {
-    db.users = [
-      {id:'u_admin', username:'admin', password:'isoc2569', name:'ผู้ดูแลระบบ', role:'admin', rank:'', email:'', active:true, created_at:'2026-04-01'},
-      {id:'u_officer', username:'officer', password:'fuel2569', name:'กฤษดา จันทรวิจิตรกุล', role:'officer', rank:'พ.ท.', email:'', active:true, created_at:'2026-04-01'},
-      {id:'u_viewer', username:'commander', password:'view2569', name:'ผู้บังคับบัญชา', role:'viewer', rank:'', email:'', active:true, created_at:'2026-04-01'}
-    ];
+  // เพิ่ม users array ว่างถ้าไม่มี (ไม่เพิ่ม default user — ป้องกันรหัสถูกรีเซ็ต)
+  if (!db.users) {
+    db.users = [];
     changed = true;
-    console.log('✅ Migration: เพิ่มบัญชี Default User (admin/officer/commander)');
-  }
-
-  // ตรวจว่ามี admin อย่างน้อย 1 บัญชี — ถ้าไม่มีให้เพิ่มกลับ
-  const hasAdmin = db.users.some(u => u.role === 'admin' && u.active);
-  if (!hasAdmin) {
-    db.users.push({id:'u_admin_recovery', username:'admin', password:'isoc2569', name:'ผู้ดูแลระบบ', role:'admin', rank:'', email:'', active:true, created_at:new Date().toISOString()});
-    changed = true;
-    console.log('⚠️ Migration: ไม่พบบัญชี Admin → เพิ่มบัญชี Recovery: admin/isoc2569');
   }
 
   // เพิ่ม audit_log, login_log
@@ -1629,19 +1626,24 @@ function migrateDB() {
 }
 
 // Reset และโหลดข้อมูล seed ใหม่ (เรียกจากปุ่มในหน้า settings)
+// คงผู้ใช้ + audit log + ตั้งค่า ไว้เสมอ — รีเซ็ตเฉพาะข้อมูลรถ + การเติมน้ำมัน
 function resetWithSeedData() {
-  if (!confirm('⚠️ การดำเนินการนี้จะลบข้อมูลเดิมทั้งหมด และโหลดข้อมูลรถ 25 คันพร้อมรายการเติมเดือน เม.ย. 69 ใหม่ ยืนยันหรือไม่?')) return;
+  if (!confirm('⚠️ การดำเนินการนี้จะลบข้อมูลรถและรายการเติมน้ำมันเดิมทั้งหมด แล้วโหลดข้อมูลรถ 25 คันใหม่\n\n(บัญชีผู้ใช้และรหัสผ่านจะคงไว้)\n\nยืนยันหรือไม่?')) return;
   db = {
     settings: db.settings,
     vehicles: [],
-    fuel_entries: []
+    fuel_entries: [],
+    users: db.users || [],          // ✅ คงผู้ใช้ไว้
+    audit_log: db.audit_log || [],
+    login_log: db.login_log || [],
+    current_user: db.current_user
   };
   loadSeedData();
   populateVehicleSelects();
   renderDashboard();
   renderVehicleTable();
   renderFuelTable();
-  showNotify('โหลดข้อมูลเริ่มต้น 25 คัน + 11 รายการเติมเรียบร้อย');
+  showNotify('โหลดข้อมูลเริ่มต้น 25 คัน + 16 รายการเติมเรียบร้อย (บัญชีผู้ใช้คงเดิม)');
   showPage('dashboard');
 }
 
@@ -3754,13 +3756,21 @@ function renderAnalytics() {
 
 
 function clearAllData() {
-  if (!confirm('⚠️ ล้างข้อมูลทั้งหมด? การดำเนินการนี้ไม่สามารถย้อนกลับได้!')) return;
+  if (!confirm('⚠️ ล้างข้อมูลรถและรายการเติมน้ำมันทั้งหมด?\n\n(บัญชีผู้ใช้และรหัสผ่านจะคงไว้)\n\nการดำเนินการนี้ไม่สามารถย้อนกลับได้!')) return;
   if (!confirm('ยืนยันอีกครั้ง: ล้างข้อมูลทั้งหมดหรือไม่?')) return;
-  db = { settings: db.settings, vehicles: [], fuel_entries: [] };
+  db = {
+    settings: db.settings,
+    vehicles: [],
+    fuel_entries: [],
+    users: db.users || [],          // ✅ คงผู้ใช้ไว้
+    audit_log: db.audit_log || [],
+    login_log: db.login_log || [],
+    current_user: db.current_user
+  };
   saveDB();
   populateVehicleSelects();
   renderDashboard();
-  showNotify('ล้างข้อมูลเรียบร้อย');
+  showNotify('ล้างข้อมูลรถและรายการเติมน้ำมันเรียบร้อย (บัญชีผู้ใช้คงเดิม)');
 }
 
 // ===================== INIT =====================
